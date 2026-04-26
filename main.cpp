@@ -5,6 +5,12 @@
 
 using namespace std;
 
+enum AppState{
+    MAIN_MENU,
+    IN_GAME,
+    EXIT
+};
+
 //game states: who's turn is it?
 enum GameState{
     PLAYER_TURN,
@@ -41,6 +47,26 @@ struct PlayerTimers{
     float dodgeTime;
     float cooldownTime;
     float timer;
+};
+
+struct FadeProperties{
+    float fadeAlpha;
+    float fadeSpeed;
+    bool fadeDone;
+};
+
+struct Animation{
+    Texture2D animTexture;
+    int frameWidth;
+    int frameHeight;
+    int frameCount;
+    int framesPerRow;
+    int currentFrame;
+    float frameTime;  //how long each frame lasts
+    float timer;
+    bool animLoops;
+    bool animFinsihed;
+    Rectangle source;
 };
 
 class Attack{
@@ -113,17 +139,25 @@ class Attack{
 };
 
 class Fighters{
+    private:
+        Rectangle hitboxRect;
+        friend void drawDebugHitbox(const Fighters& f);
+
     protected:
         int hp;
         int damage;
         Vector3 position;
-
+        
         Attack* currAttack;
         vector<AttackData> attackList;
         vector<AttackData> skillList;
 
+        void setHitboxPos(float x, float y){
+            hitboxRect.x = x;
+            hitboxRect.y = y;
+        }
+
     public:
-        Rectangle hitboxRect;
         Color debugColor;
 
         Fighters(int h, int d, Vector3 pos): hp(h), damage(d), position(pos){
@@ -151,10 +185,6 @@ class Fighters{
 
         void draw(Model m, Vector3 pos, Color c){
             DrawModel(m, {pos.x, pos.y, pos.z}, 2, c);
-        }
-
-        void drawHitbox(int x, int y, int width, int height){
-            DrawRectangle(x, y, width, height, debugColor);
         }
 
         //attack class shenanigans
@@ -201,6 +231,7 @@ class Fighters{
 
         string getAttackName() const {return currAttack->getName();}
         bool canAttackHit() const {return currAttack && currAttack->canResolveHit();}
+        
         void resolveAttackHit() {
             if(currAttack) {currAttack->markHitResolved();} //hit can only be applied once per frame per ATTACK_ACTIVE instead of every frame it is active
         }
@@ -213,6 +244,11 @@ class Fighters{
         Rectangle getHitbox() const {return hitboxRect;}
 };
 
+//debug hitbox drawing
+void drawDebugHitbox(const Fighters& f){
+    DrawRectangle(f.hitboxRect.x, f.hitboxRect.y, f.hitboxRect.width, f.hitboxRect.height, f.debugColor);
+}
+
 class Player: public Fighters{
     private:
         PlayerTimers pt;
@@ -224,8 +260,7 @@ class Player: public Fighters{
 
     public:
         Player(int h, int d, Vector3 pos): Fighters(h, d, pos), parriedAll(true), hasDodged(false), selectedAttack(0), attackOrSkill(0), AP(0){
-            hitboxRect.x = 650;
-            hitboxRect.y = 270;
+            setHitboxPos(650, 270);
             debugColor = LIGHTGRAY;
             pt.parryTime = 0.2f;
             pt.dodgeTime = 0.45f;
@@ -238,7 +273,7 @@ class Player: public Fighters{
         }
 
         void chooseAndStartAttack(){
-            if(isAttacking()) {return;} //don't do anything if an attack already exists, exists function
+            if(isAttacking()) return; //don't do anything if an attack already exists, exists function
 
             if(attackOrSkill == 0){
 
@@ -306,8 +341,7 @@ class Enemy: public Fighters{
     public:
         Enemy(int h, int d, Vector3 pos): Fighters(h, d, pos), enemyTurnResolved(false) {
             debugColor = YELLOW;
-            hitboxRect.x = 570;
-            hitboxRect.y = 270;
+            setHitboxPos(570, 270);
             currAttack = nullptr;
 
             //attack pool
@@ -318,8 +352,6 @@ class Enemy: public Fighters{
 
         void chooseAndStartAttack(){
             if(isAttacking()) return;
-
-            cout << "KASHDK" << endl;
 
             int index = GetRandomValue(0, attackList.size() - 1);
             startAttack(attackList[index]);
@@ -333,6 +365,93 @@ class Enemy: public Fighters{
 
 void updateEnenmyTurn(float delta, Player& player, Enemy& enemy, PlayerDefenseState& playerDefenseState, GameState& gameState);
 
+void fadeTransition(FadeProperties& fade , bool inOrOut, float delta){
+    if(!fade.fadeDone){
+        if(inOrOut){
+            fade.fadeAlpha -= delta * fade.fadeSpeed;
+
+            if(fade.fadeAlpha <= 0.0f){
+                fade.fadeAlpha = 0.0f;
+                fade.fadeDone = true;
+            }
+        }
+        else if(!inOrOut){
+            fade.fadeAlpha += delta * fade.fadeSpeed;
+
+            if(fade.fadeAlpha >= 1.0f){
+                fade.fadeAlpha = 1.0f;
+                fade.fadeDone = true;
+            }
+        }
+    }
+}
+
+void pulsatingEffect(float& alpha ,float delta){
+    static bool pulse = false;
+    const float pulseRate = 0.625f;
+
+    if(pulse == false && alpha < 1.0f){
+        alpha += pulseRate * delta;
+    }
+    else if(alpha >=1.0f){
+        alpha = 1.0f;
+        pulse = true;
+    }
+    
+    if(pulse == true && alpha > 0.0f){
+        alpha -= pulseRate * delta;
+    }
+    else if(alpha <= 0.0f){
+        alpha = 0.0f;
+        pulse = false;
+    }
+}
+
+void initAnimation(Animation& anim, Texture2D tex, int fw, int fh, int count, int framesPerRow, float fps, bool loop = true){
+    anim.animTexture = tex;
+    anim.frameWidth = fw;
+    anim.frameHeight = fh;
+    anim.frameCount = count;
+    anim.framesPerRow = framesPerRow;
+    anim.currentFrame = 0;
+    anim.frameTime = 1.0f / fps;
+    anim.timer = 0.0f;
+    anim.animLoops = loop;
+    anim.animFinsihed = false;
+
+    anim.source = {0, 0, (float)fw, (float)fh};
+}
+
+void updateAnimation(Animation& anim, float delta){
+    if(anim.animFinsihed) {return;}
+
+    anim.timer += delta;
+
+    if(anim.timer >= anim.frameTime){
+        anim.timer = 0.0f;
+        anim.currentFrame++;
+
+        if(anim.currentFrame >= anim.frameCount){
+            if(anim.animLoops) {anim.currentFrame = 0;}
+            else {
+                anim.currentFrame = anim.frameCount - 1;
+                anim.animFinsihed = true;
+            }
+        }
+
+        int col = anim.currentFrame % anim.framesPerRow;
+        int row = anim.currentFrame / anim.framesPerRow;
+
+        anim.source.x = col * anim.frameWidth;
+        anim.source.y = row * anim.frameHeight;
+    }
+}
+
+void drawAnimation(const Animation& anim, Vector2 pos, float scale, Color tint = WHITE){
+    Rectangle dest = {pos.x, pos.y, anim.frameWidth * scale, anim.frameHeight * scale};
+    DrawTexturePro(anim.animTexture, anim.source, dest, {0, 0}, 0.0f, tint);
+}
+
 int main()
 {    
     const int screenW = 1280;
@@ -344,13 +463,38 @@ int main()
     float delta;
     bool playerStartedAttack = false;
 
+    //assets
+    Texture2D e2dLogo = LoadTexture("assets/e2d logo.png");
+    Texture2D backdrop = LoadTexture("assets/main menu backdrop.png");
+    Font menuFont = LoadFont("assets/Cinzel-VariableFont_wght.ttf");
+    Texture2D petals = LoadTexture("assets/petal_anim_spritesheet.png");
+
+    Animation petalFlowAnim;
+    initAnimation(petalFlowAnim, petals, 512, 288, 64, 8, 24, true);
+
+    //text centering and other text related things
+    const char* continueText = "Press E to continue";
+    int fontSize = 60;
+    float fontSpacing = 2.0f;
+    Vector2 textSize = MeasureTextEx(menuFont, continueText, fontSize, fontSpacing);
+    Vector2 textPosition = {(screenW - textSize.x)/2, 550};
+    SetTextureFilter(menuFont.texture, TEXTURE_FILTER_POINT);
+
+    //screen fade logic and variables
+    FadeProperties fadeOut = {1.0f, 0.25f, false};
+    FadeProperties fadeIn = {0.0f, 0.75f, false};
+    FadeProperties logoFadeIn = {0.0f, 0.5f, false};
+    float timeToLogo = 0.7f;
+    bool startTransToGame = false;
+    float textAlpha = 0.0f;
+
     //fighters
     Player player(50, 5, {5, 1, 0});
     Enemy enemy(50, 5, {-5, 1, 0});
     
     //camera
     Camera3D cam = Camera3D();
-    cam.position = {0, 3.5f, 10.0f};
+    cam.position = {0, 3.5f, 20.0f};
     cam.target = {0, 0, 0};
     cam.up = {0 , 1, 0};
     cam.fovy = 65;
@@ -359,9 +503,11 @@ int main()
     //models
     Mesh cubeMesh = GenMeshCube(1, 1, 1);
     Model cubeModel = LoadModelFromMesh(cubeMesh);
+
     //state management
     GameState gameState = PLAYER_TURN;
     PlayerDefenseState playerDefenseState = NONE;
+    AppState appState = MAIN_MENU;
 
     //put the logic stuff before any of the drawing stuff unless you have to do so otherwise
     //IMPORTANT NOTE: YOU CAN HAVE PLAYER STATES AND ENEMY STATES RUN AT THE SAME TIME, THE WHILE LOOP IS RUNNING EVERY FRAME ANYWAYS, USE IT TO YOUR ADVANTAGE
@@ -372,137 +518,202 @@ int main()
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
-        BeginMode3D(cam);
-        
-        DrawGrid(15, 1);
-        player.draw(cubeModel, player.getPos(), BLUE);
-        enemy.draw(cubeModel, enemy.getPos(), RED);
-
-        EndMode3D();
-
-        switch(gameState)
+        switch(appState)
         {
-            case PLAYER_TURN:
+            case MAIN_MENU:
             {
-                player.chooseAndStartAttack();
+                DrawTexture(backdrop, 0, 0, WHITE);
 
-                if(player.isAttacking()){
-                    playerStartedAttack = true;
+                updateAnimation(petalFlowAnim, delta);
+                drawAnimation(petalFlowAnim, {0, 0}, 2.5f, {255, 255, 255, 100});
+                fadeTransition(fadeOut, true, delta);
+                
+                if(timeToLogo >= 0.0f){
+                    timeToLogo -= delta;
+                }
+                else if(timeToLogo <= 0.0f){
+                    fadeTransition(logoFadeIn, false, delta);
+                }
+                
+                if(IsKeyPressed(KEY_E) && fadeOut.fadeDone && !startTransToGame ){
+                    startTransToGame = true;
                 }
 
-                player.updateAttack(delta);
+                if(startTransToGame == true){
+                    fadeTransition(fadeIn, false, delta);
+                    if(fadeIn.fadeDone){
+                        appState = IN_GAME;
+                        fadeOut = {1.0f, 0.75f, false};
+                    }
+                }
 
-                if(player.attackingState() == ATTACK_ACTIVE){
-                    player.debugColor = GREEN;
-                    if(player.canAttackHit() && CheckCollisionRecs(enemy.getHitbox(), player.getAttackHitbox())){
-                        player.resolveAttackHit();
-                        enemy.takeDamage(player.getAttackDmg());
+                pulsatingEffect(textAlpha, delta);
 
-                        if(enemy.isDead()){
-                            gameState = GAME_OVER;
+                DrawTexture(e2dLogo, ((screenW - e2dLogo.width)/2), 150, Fade(WHITE, logoFadeIn.fadeAlpha));
+                DrawTextEx(menuFont, continueText, textPosition, fontSize, fontSpacing, Fade(WHITE, textAlpha));
+
+                if(!startTransToGame){
+                    DrawRectangle(0, 0, screenW, screenH, Fade(BLACK, fadeOut.fadeAlpha));
+                }
+                else{
+                    DrawRectangle(0, 0, screenW, screenH, Fade(BLACK, fadeIn.fadeAlpha));
+                }
+                
+
+                break;
+            }
+
+            case IN_GAME:
+            {
+                BeginMode3D(cam);
+
+                DrawGrid(15, 1);
+                player.draw(cubeModel, player.getPos(), BLUE);
+                enemy.draw(cubeModel, enemy.getPos(), RED);
+
+                EndMode3D();
+
+                if(cam.position.z >=12.0f)
+                cam.position.z -= 3.5 * delta;
+
+                fadeTransition(fadeOut, true, delta);
+
+                if(fadeOut.fadeDone){
+                    switch(gameState)
+                    {
+                        case PLAYER_TURN:
+                        {
+                            player.chooseAndStartAttack();
+
+                            if(player.isAttacking()){
+                                playerStartedAttack = true;
+                            }
+
+                            player.updateAttack(delta);
+
+                            if(player.attackingState() == ATTACK_ACTIVE){
+                                player.debugColor = GREEN;
+                                if(player.canAttackHit() && CheckCollisionRecs(enemy.getHitbox(), player.getAttackHitbox())){
+                                    player.resolveAttackHit();
+                                    enemy.takeDamage(player.getAttackDmg());
+
+                                    if(enemy.isDead()){
+                                        gameState = GAME_OVER;
+                                    }
+                                }
+                            }
+
+                            if(playerStartedAttack && !player.isAttacking())
+                            {
+                                player.debugColor = LIGHTGRAY;
+                                playerStartedAttack = false;
+                                enemy.setEnemyTurnResolve(false);
+                                player.setParriedAll(true);
+                                player.setHasDodged(false);
+                                player.increaseAP();
+                                gameState = ENEMY_TURN;
+                            }
+                            break;
                         }
+
+                        case ENEMY_TURN: //add attack class thingy
+                        {
+                            updateEnenmyTurn(delta, player, enemy, playerDefenseState, gameState);                
+
+                            break;
+                        }
+
+                        case GAME_OVER:
+                            break;
+                    }
+
+                    //player input states
+                    if(gameState == ENEMY_TURN)
+                    {
+                        switch(playerDefenseState)
+                        {
+                            case NONE:
+                            {
+                                if(IsKeyPressed(KEY_R)){
+                                    player.debugColor = BLUE;
+                                    playerDefenseState = PARRY;
+                                }
+                                else if(IsKeyPressed(KEY_Q)){
+                                    player.debugColor = BLUE;
+                                    playerDefenseState = DODGE;
+                                }
+
+                                break;
+                            }
+
+                            case PARRY:
+                            {
+                                if(player.getCurrentTime() < player.getParryTime()){
+                                    player.updatePlayerTimer(delta);
+                                }
+                                else if(player.getCurrentTime() >= player.getParryTime()){
+                                    player.resetPlayerTimer();
+                                    playerDefenseState = COOLDOWN;
+                                }
+
+                                break;
+                            }
+
+                            case DODGE:
+                            {
+                                if(player.getCurrentTime() < player.getDodgeTime()){
+                                    player.updatePlayerTimer(delta);
+                                }
+                                else if(player.getCurrentTime() >= player.getDodgeTime()){
+                                    player.resetPlayerTimer();
+                                    player.debugColor = LIGHTGRAY;
+                                    playerDefenseState = COOLDOWN;
+                                }
+
+                                break;
+                            }
+
+                            case COOLDOWN:
+                            {
+                                player.debugColor = LIGHTGRAY;
+
+                                if(player.getCurrentTime() < player.getCooldownTime()){
+                                    player.updatePlayerTimer(delta);
+                                }
+                                else if(player.getCurrentTime() >= player.getCooldownTime()){
+                                    player.resetPlayerTimer();
+                                    playerDefenseState = NONE;
+                                }
+                                break;
+                            }
+                        }
+                    } 
+                }
+
+                drawDebugHitbox(player);
+                drawDebugHitbox(enemy);
+
+                DrawText(TextFormat("Player HP: %i", player.getHP()), 1000, 50, 30, BLACK);
+                DrawText(TextFormat("AP: %i", player.getAP()), 1000, 100, 30, BLACK);
+                DrawText(TextFormat("Enemy HP: %i", enemy.getHP()), 50, 50, 30, BLACK);
+
+                if(gameState == GAME_OVER){
+                    if(enemy.isDead()){
+                        DrawText(TextFormat("PLAYER WINS"), 500, 650, 30, BLACK);
+                    }
+                    else{
+                        DrawText(TextFormat("ENEMY WINS"), 500, 650, 30, BLACK);
                     }
                 }
 
-                if(playerStartedAttack && !player.isAttacking())
-                {
-                    player.debugColor = LIGHTGRAY;
-                    playerStartedAttack = false;
-                    enemy.setEnemyTurnResolve(false);
-                    player.setParriedAll(true);
-                    player.setHasDodged(false);
-                    player.increaseAP();
-                    gameState = ENEMY_TURN;
-                }
+                DrawRectangle(0, 0, screenW, screenH, Fade(BLACK, fadeOut.fadeAlpha));
+
                 break;
             }
 
-            case ENEMY_TURN: //add attack class thingy
+            case EXIT:
             {
-                updateEnenmyTurn(delta, player, enemy, playerDefenseState, gameState);                
-
                 break;
-            }
-
-            case GAME_OVER:
-                break;
-        }
-
-        //player input states
-        if(gameState == ENEMY_TURN)
-        {
-            switch(playerDefenseState)
-            {
-                case NONE:
-                {
-                    if(IsKeyPressed(KEY_P)){
-                        player.debugColor = BLUE;
-                        playerDefenseState = PARRY;
-                    }
-                    else if(IsKeyPressed(KEY_D)){
-                        player.debugColor = BLUE;
-                        playerDefenseState = DODGE;
-                    }
-
-                    break;
-                }
-
-                case PARRY:
-                {
-                    if(player.getCurrentTime() < player.getParryTime()){
-                        player.updatePlayerTimer(delta);
-                    }
-                    else if(player.getCurrentTime() >= player.getParryTime()){
-                        player.resetPlayerTimer();
-                        playerDefenseState = COOLDOWN;
-                    }
-
-                    break;
-                }
-
-                case DODGE:
-                {
-                    if(player.getCurrentTime() < player.getDodgeTime()){
-                        player.updatePlayerTimer(delta);
-                    }
-                    else if(player.getCurrentTime() >= player.getDodgeTime()){
-                        player.resetPlayerTimer();
-                        player.debugColor = LIGHTGRAY;
-                        playerDefenseState = COOLDOWN;
-                    }
-
-                    break;
-                }
-
-                case COOLDOWN:
-                {
-                    player.debugColor = LIGHTGRAY;
-
-                    if(player.getCurrentTime() < player.getCooldownTime()){
-                        player.updatePlayerTimer(delta);
-                    }
-                    else if(player.getCurrentTime() >= player.getCooldownTime()){
-                        player.resetPlayerTimer();
-                        playerDefenseState = NONE;
-                    }
-                    break;
-                }
-            } 
-        }
-
-        player.drawHitbox(player.hitboxRect.x, player.hitboxRect.y, player.hitboxRect.width, player.hitboxRect.height);
-        enemy.drawHitbox(enemy.hitboxRect.x, enemy.hitboxRect.y, enemy.hitboxRect.width, enemy.hitboxRect.height);
-
-        DrawText(TextFormat("Player HP: %i", player.getHP()), 1000, 50, 30, BLACK);
-        DrawText(TextFormat("AP: %i", player.getAP()), 1000, 100, 30, BLACK);
-        DrawText(TextFormat("Enemy HP: %i", enemy.getHP()), 50, 50, 30, BLACK);
-
-        if(gameState == GAME_OVER){
-            if(enemy.isDead()){
-                DrawText(TextFormat("PLAYER WINS"), 500, 650, 30, BLACK);
-            }
-            else{
-                DrawText(TextFormat("ENEMY WINS"), 500, 650, 30, BLACK);
             }
         }
 
@@ -540,7 +751,6 @@ void updateEnenmyTurn(float delta, Player& player, Enemy& enemy, PlayerDefenseSt
                 }
                 else if(playerDefenseState == DODGE){
                     cout << "DODGE" << endl;
-                    player.increaseAP();
                     player.setHasDodged(true);
                 }
                 else{
