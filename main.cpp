@@ -2,6 +2,8 @@
 #include "raylib.h"
 #include <string>
 #include <vector>
+#include <fstream>
+#include <sstream>
 
 using namespace std;
 
@@ -68,6 +70,8 @@ struct Animation{
     bool animFinsihed;
     Rectangle source;
 };
+
+vector<AttackData> loadAttacksFromFile(const string& path);
 
 class Attack{
     private:
@@ -262,53 +266,62 @@ class Player: public Fighters{
         Player(int h, int d, Vector3 pos): Fighters(h, d, pos), parriedAll(true), hasDodged(false), selectedAttack(0), attackOrSkill(0), AP(0){
             setHitboxPos(650, 270);
             debugColor = LIGHTGRAY;
-            pt.parryTime = 0.2f;
-            pt.dodgeTime = 0.45f;
+            pt.parryTime = 0.3f;
+            pt.dodgeTime = 0.5f;
             pt.cooldownTime = 0.2f;
 
             //attack pool
-            attackList.push_back({"Light Slash", 0.3f, 0.2f, 0.3f, 5, 1, 0}); //name, windup, active, recovery, damage, numAttacks, apCost
-            attackList.push_back({"Heavy Slash", 0.6f, 0.25f, 0.5f, 10, 1, 0});
-            skillList.push_back({"Multi Strike", 0.4f, 0.15f, 0.35f, 3, 3, 3}); //skill
+            attackList = loadAttacksFromFile("player_attacks.txt");
+
+            for (auto it = attackList.begin(); it != attackList.end(); ){
+                if (it->apCost > 0) {
+                    skillList.push_back(*it);
+                    it = attackList.erase(it);
+                } else {++it;}
+            }
         }
 
         void chooseAndStartAttack(){
             if(isAttacking()) return; //don't do anything if an attack already exists, exists function
 
-            if(attackOrSkill == 0){
+            if (attackOrSkill == 0){
+                DrawText("1) ATTACKS", 950, 610, 20, BLACK);
+                DrawText("2) SKILLS", 950, 630, 20, BLACK);
 
-                DrawText(TextFormat("1) ATTACKS"), 950, 610, 20, BLACK);
-                DrawText(TextFormat("2) SKILLS"), 950, 630, 20, BLACK);
-
-                if(IsKeyPressed(KEY_ONE)){
-                    attackOrSkill = 1;
-
-                    if(IsKeyPressed(KEY_ONE)) {selectedAttack = 0;}
-                    if(IsKeyPressed(KEY_TWO)) {selectedAttack = 1;}
-                }
-
-                if(IsKeyPressed(KEY_TWO)){
-                    attackOrSkill = 2;
-
-                    if(IsKeyPressed(KEY_ONE)) {selectedAttack = 0;}
-                }
+                if (IsKeyPressed(KEY_ONE)) attackOrSkill = 1;
+                if (IsKeyPressed(KEY_TWO)) attackOrSkill = 2;
+            }
+            else{
+                if (IsKeyPressed(KEY_ONE)) selectedAttack = 0;
+                if (IsKeyPressed(KEY_TWO)) selectedAttack = 1;
+                if (IsKeyPressed(KEY_THREE)) selectedAttack = 2;
             }
 
             //drawing the options
             if(attackOrSkill == 1){
-                DrawText(TextFormat("1) Light Attack"), 950, 610, 20, BLACK);
-                DrawText(TextFormat("2) Heavy Slash"), 950, 630, 20, BLACK);
+                for(int i=0; i<attackList.size(); i++){
+                    DrawText(TextFormat("%i) %s", i+1, attackList[i].attackName.c_str()), 950, 610 + i * 22, 20, BLACK);
+                }
             }
             if(attackOrSkill == 2){
-                DrawText(TextFormat("1) Multi Strike"), 950, 610, 20, BLACK);
+                for(int i=0; i<skillList.size(); i++){
+                    DrawText(TextFormat("%i) %s (AP: %i)", i+1, skillList[i].attackName.c_str(), skillList[i].apCost), 950, 610 + i * 22, 20, BLACK);
+                }
             }
 
-            if(IsKeyPressed(KEY_ENTER)){
-                if(attackOrSkill == 1) {startAttack(attackList[selectedAttack]);}
-                else if(attackOrSkill == 2){
-                    if(AP >= skillList[selectedAttack].apCost){
-                        startAttack(skillList[selectedAttack]);
-                        AP -= skillList[selectedAttack].apCost;
+            if (IsKeyPressed(KEY_ENTER)){
+                if (attackOrSkill == 1){
+                    if (selectedAttack >= 0 && selectedAttack < attackList.size()){
+                        startAttack(attackList[selectedAttack]);
+                    }
+                }
+
+                else if (attackOrSkill == 2){
+                    if (selectedAttack >= 0 && selectedAttack < skillList.size()){
+                        if (AP >= skillList[selectedAttack].apCost){
+                            startAttack(skillList[selectedAttack]);
+                            AP -= skillList[selectedAttack].apCost;
+                        }
                     }
                 }
 
@@ -364,6 +377,36 @@ class Enemy: public Fighters{
 
 
 void updateEnenmyTurn(float delta, Player& player, Enemy& enemy, PlayerDefenseState& playerDefenseState, GameState& gameState);
+
+vector<AttackData> loadAttacksFromFile(const string& path){
+    vector<AttackData> attacks;
+    ifstream file(path);
+
+    if (!file.is_open()) {
+        cout << "Failed to open: " << path << endl;
+        return attacks;
+    }
+
+    string line;
+
+    while (getline(file, line)){
+        stringstream ss(line);
+        AttackData a;
+        string temp;
+
+        getline(ss, a.attackName, ',');
+        getline(ss, temp, ','); a.attackWindup = stof(temp);
+        getline(ss, temp, ','); a.attackActive = stof(temp);
+        getline(ss, temp, ','); a.attackRecovery = stof(temp);
+        getline(ss, temp, ','); a.damage = stoi(temp);
+        getline(ss, temp, ','); a.numOfAttacks = stoi(temp);
+        getline(ss, temp, ','); a.apCost = stoi(temp);
+        attacks.push_back(a);
+    }
+
+    file.close();
+    return attacks;
+}
 
 void fadeTransition(FadeProperties& fade , bool inOrOut, float delta){
     if(!fade.fadeDone){
@@ -468,9 +511,10 @@ int main()
     Texture2D backdrop = LoadTexture("assets/main menu backdrop.png");
     Font menuFont = LoadFont("assets/Cinzel-VariableFont_wght.ttf");
     Texture2D petals = LoadTexture("assets/petal_anim_spritesheet.png");
+    Model scenery = LoadModel("assets/scenery.glb");
 
     Animation petalFlowAnim;
-    initAnimation(petalFlowAnim, petals, 512, 288, 64, 8, 24, true);
+    initAnimation(petalFlowAnim, petals, 512, 288, 64, 8, 18, true);
 
     //text centering and other text related things
     const char* continueText = "Press E to continue";
@@ -497,7 +541,7 @@ int main()
     cam.position = {0, 3.5f, 20.0f};
     cam.target = {0, 0, 0};
     cam.up = {0 , 1, 0};
-    cam.fovy = 65;
+    cam.fovy = 70;
     cam.projection = CAMERA_PERSPECTIVE;
 
     //models
@@ -567,9 +611,10 @@ int main()
             {
                 BeginMode3D(cam);
 
-                DrawGrid(15, 1);
                 player.draw(cubeModel, player.getPos(), BLUE);
                 enemy.draw(cubeModel, enemy.getPos(), RED);
+
+                DrawModelEx(scenery, {-5.5f, 0, 0}, {0, 1, 0}, 90.0f, {1.0f, 1.0f, 1.0f}, WHITE);
 
                 EndMode3D();
 
@@ -720,6 +765,8 @@ int main()
         EndDrawing();
     }
 
+    UnloadModel(scenery);
+
     CloseWindow();
     return 0;
 }
@@ -735,7 +782,7 @@ void updateEnenmyTurn(float delta, Player& player, Enemy& enemy, PlayerDefenseSt
     if (enemy.isAttacking()){
 
         if(enemy.attackingState() == ATTACK_WINDUP){
-            DrawText(TextFormat("ENEMY READYING ATTACK"), 500, 650, 30, BLACK);
+            DrawText(TextFormat("ENEMY READYING ATTACK: %s", enemy.getAttackName().c_str()), 500, 650, 30, BLACK);
             enemy.debugColor = ORANGE;
             cout << enemy.getAttackName() << endl;
         }
