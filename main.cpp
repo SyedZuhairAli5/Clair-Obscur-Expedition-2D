@@ -138,7 +138,7 @@ class Attack{
 };
 
 void updateAnimation(Animation& anim, float delta);
-void drawBillboardAnimation(const Camera3D& cam, const Animation& anim, Vector3 worldPos, float scale, Color tint = WHITE);
+void drawBillboardAnimation(const Camera3D& cam, const Animation& anim, Vector3 worldPos, float scale, bool facingRight, Color tint = WHITE);
 
 class Fighters{
     private:
@@ -148,6 +148,7 @@ class Fighters{
     protected:
         int hp;
         int damage;
+        bool facingRight;
         Vector3 position;
         
         Attack* currAttack;
@@ -189,6 +190,16 @@ class Fighters{
             hitboxRect.y = y;
         }
 
+        void setAnimState(AnimState newState){
+            if (animState != newState)
+            {
+                animState = newState;
+                getAnimFromState().currentFrame = 0;
+                getAnimFromState().timer = 0.0f;
+                getAnimFromState().animFinsihed = false;
+            }
+        }
+
     public:
         Color debugColor;
 
@@ -213,7 +224,7 @@ class Fighters{
         }
 
         void drawBillboard(const Camera3D& cam){
-            drawBillboardAnimation(cam, getAnimFromState(), position, 0.035f, WHITE);
+            drawBillboardAnimation(cam, getAnimFromState(), position, 0.035f,facingRight, WHITE);
         }
 
         void takeDamage(int dmg){
@@ -306,6 +317,7 @@ class Player: public Fighters{
             pt.parryTime = 0.3f;
             pt.dodgeTime = 0.5f;
             pt.cooldownTime = 0.2f;
+            facingRight = false;
 
             //attack pool
             attackList = loadAttacksFromFile("player_attacks.txt");
@@ -352,11 +364,16 @@ class Player: public Fighters{
                 for(int i=0; i<attackList.size(); i++){
                     DrawText(TextFormat("%i) %s", i+1, attackList[i].attackName.c_str()), 950, 610 + i * 22, 20, BLACK);
                 }
+
+                if(selectedAttack== 0) setAnimState(ATTACK1);
+                else if(selectedAttack == 1) setAnimState(ATTACK2);
             }
             if(attackOrSkill == 2){
                 for(int i=0; i<skillList.size(); i++){
                     DrawText(TextFormat("%i) %s (AP: %i)", i+1, skillList[i].attackName.c_str(), skillList[i].apCost), 950, 610 + i * 22, 20, BLACK);
                 }
+
+                setAnimState(ATTACK3);
             }
 
             if (IsKeyPressed(KEY_ENTER)){
@@ -378,6 +395,30 @@ class Player: public Fighters{
                 selectedAttack = 0;
                 attackOrSkill = 0;
             }
+        }
+
+        void updateAnimationState(){
+            if (isDead()){
+                setAnimState(DEAD);
+                return;
+            }
+
+            if (isAttacking()){
+                switch (attackingState())
+                {
+                    case ATTACK_WINDUP:
+                    case ATTACK_ACTIVE:
+                        // animation already chosen when attack started
+                        break;
+
+                    case ATTACK_FINISHED:
+                        setAnimState(IDLE);
+                        break;
+                }
+                return;
+            }
+
+            setAnimState(IDLE);
         }
 
         //timer, parry, dodge and AP setters
@@ -406,6 +447,7 @@ class Enemy: public Fighters{
             debugColor = YELLOW;
             setHitboxPos(570, 270);
             currAttack = nullptr;
+            facingRight = true;
 
             //attack pool
             attackList.push_back({"Fast Jab" ,0.4f, 0.2f, 0.35f, 5, 1});
@@ -421,6 +463,28 @@ class Enemy: public Fighters{
             initAnimation(hurtAnim, tex.hurt, 128, 128, 2, 2, 8, false);
             initAnimation(deadAnim, tex.dead, 128, 128, 3, 3, 6, false);
             animState = IDLE;
+        }
+
+        void updateAnimationState(){
+            if (isDead()){
+                setAnimState(DEAD);
+                return;
+            }
+
+            if (isAttacking()){
+                if (attackingState() == ATTACK_WINDUP ||
+                    attackingState() == ATTACK_ACTIVE)
+                {
+                    setAnimState(ATTACK1); // or randomize later
+                }
+                else if (attackingState() == ATTACK_FINISHED)
+                {
+                    setAnimState(IDLE);
+                }
+                return;
+            }
+
+            setAnimState(IDLE);
         }
 
         void chooseAndStartAttack(){
@@ -550,8 +614,13 @@ void updateAnimation(Animation& anim, float delta){
     }
 }
 
-void drawBillboardAnimation(const Camera3D& cam, const Animation& anim, Vector3 worldPos, float scale, Color tint){
+void drawBillboardAnimation(const Camera3D& cam, const Animation& anim, Vector3 worldPos, float scale, bool facingRight, Color tint){
     Rectangle source = anim.source;
+
+      if (!facingRight) {
+        source.width = -source.width;
+        source.x += anim.frameWidth;
+    }
 
     Vector2 size = {anim.frameWidth * scale, anim.frameHeight * scale};
     Vector2 origin = { size.x / 2, size.y / 2 };
@@ -595,6 +664,11 @@ int main()
 
     CharacterAnimations enemyTex;
     enemyTex.idle = LoadTexture("assets/Samurai/Idle.png");
+    enemyTex.attack1 = LoadTexture("assets/Samurai/Attack_1.png");
+    enemyTex.attack2 = LoadTexture("assets/Samurai/Attack_2.png");
+    enemyTex.attack3 = LoadTexture("assets/Samurai/Attack_3.png");
+    enemyTex.hurt = LoadTexture("assets/Samurai/Hurt.png");
+    enemyTex.dead = LoadTexture("assets/Samurai/Dead.png");
 
     Animation petalFlowAnim;
     initAnimation(petalFlowAnim, petals, 512, 288, 64, 8, 18, true);
@@ -616,8 +690,8 @@ int main()
     float textAlpha = 0.0f;
 
     //fighters
-    Player player(50, 5, {5, 2.35f, 0});
-    Enemy enemy(50, 5, {-5, 2.35f, 0});
+    Player player(50, 5, {1.5, 2.35f, 0});
+    Enemy enemy(50, 5, {-1.5, 2.35f, 0});
 
     player.initAnimations(playerTex);
     enemy.initAnimations(enemyTex);
@@ -697,8 +771,10 @@ int main()
             {
                 BeginMode3D(cam);
 
-               player.updateFighterAnimation(delta);
+                player.updateFighterAnimation(delta);
                 enemy.updateFighterAnimation(delta);
+                player.updateAnimationState();
+                enemy.updateAnimationState();
 
                 player.drawBillboard(cam);
                 enemy.drawBillboard(cam);
@@ -822,9 +898,6 @@ int main()
                         }
                     } 
                 }
-
-                drawDebugHitbox(player);
-                drawDebugHitbox(enemy);
 
                 DrawText(TextFormat("Player HP: %i", player.getHP()), 1000, 50, 30, BLACK);
                 DrawText(TextFormat("AP: %i", player.getAP()), 1000, 100, 30, BLACK);
