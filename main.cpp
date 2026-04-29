@@ -12,7 +12,7 @@ enum AppState{MAIN_MENU, IN_GAME, EXIT};
 enum GameState{PLAYER_TURN, ENEMY_TURN, GAME_OVER};
 enum AttackState{ATTACK_WINDUP, ATTACK_ACTIVE, ATTACK_RECOVERY, ATTACK_FINISHED};
 enum PlayerDefenseState{NONE, PARRY, DODGE, COOLDOWN};
-enum AnimState{ IDLE, RIN, ATTACK1, ATTACK2, ATTACK3, PARRYANIM, DODGEANIM, HURT, DEAD };
+enum AnimState{ IDLE, RUN, ATTACK1, ATTACK2, ATTACK3, PARRYANIM, DODGEANIM, HURT, DEAD };
 
 struct AttackData{
     string attackName;
@@ -66,6 +66,7 @@ struct CharacterAnimations{
 
 vector<AttackData> loadAttacksFromFile(const string& path);
 void initAnimation(Animation& anim, Texture2D tex, int fw, int fh, int count, int framesPerRow, float fps, bool loop = true);
+
 
 class Attack{
     private:
@@ -136,6 +137,9 @@ class Attack{
         bool canResolveHit() const {return !hitResolved ;}
 };
 
+void updateAnimation(Animation& anim, float delta);
+void drawBillboardAnimation(const Camera3D& cam, const Animation& anim, Vector3 worldPos, float scale, Color tint = WHITE);
+
 class Fighters{
     private:
         Rectangle hitboxRect;
@@ -164,6 +168,22 @@ class Fighters{
         Animation hurtAnim;
         Animation deadAnim;
 
+        Animation& getAnimFromState(){
+            switch (animState)
+            {
+                case IDLE: return idleAnim;
+                case RUN: return runAnim;
+                case ATTACK1:   return attack1Anim;
+                case ATTACK2:   return attack2Anim;
+                case ATTACK3:   return attack3Anim;
+                case PARRYANIM: return parryAnim;
+                case DODGEANIM: return dodgeAnim;
+                case HURT:      return hurtAnim;
+                case DEAD:      return deadAnim;
+                default:        return idleAnim;
+            }
+        }
+
         void setHitboxPos(float x, float y){
             hitboxRect.x = x;
             hitboxRect.y = y;
@@ -187,6 +207,14 @@ class Fighters{
 
         //choose function which will be defined in player and enemy differently
         virtual void chooseAndStartAttack() = 0;
+
+        void updateFighterAnimation(float delta){
+            updateAnimation(getAnimFromState(), delta);
+        }
+
+        void drawBillboard(const Camera3D& cam){
+            drawBillboardAnimation(cam, getAnimFromState(), position, 0.035f, WHITE);
+        }
 
         void takeDamage(int dmg){
             hp -= dmg;
@@ -292,12 +320,13 @@ class Player: public Fighters{
 
         void initAnimations(const CharacterAnimations& tex){
             initAnimation(idleAnim,    tex.idle,    128, 128, 8, 8, 10, true);
-            initAnimation(runAnim,     tex.run,     128, 128, 8, 8, 12, true);
             initAnimation(attack1Anim, tex.attack1, 128, 128, 6, 6, 14, false);
             initAnimation(attack2Anim, tex.attack2, 128, 128, 6, 6, 14, false);
             initAnimation(attack3Anim, tex.attack3, 128, 128, 6, 6, 14, false);
             initAnimation(parryAnim,   tex.parry,   128, 128, 4, 4, 10, false);
             initAnimation(dodgeAnim,   tex.dodge,   128, 128, 6, 6, 12, false);
+            initAnimation(hurtAnim, tex.hurt, 128, 128, 3, 3, 8, false);
+            initAnimation(deadAnim, tex.dead, 128, 128, 3, 3, 6, false);
 
             animState = IDLE;
         }
@@ -382,6 +411,16 @@ class Enemy: public Fighters{
             attackList.push_back({"Fast Jab" ,0.4f, 0.2f, 0.35f, 5, 1});
             attackList.push_back({"Repeating Thrusts", 0.35f, 0.15f, 0.4f, 3, 3});
             attackList.push_back({"Thrust Attack", 0.6f, 0.2f, 0.35f, 10, 1});
+        }
+
+         void initAnimations(const CharacterAnimations& tex){
+            initAnimation(idleAnim, tex.idle, 128, 128, 8, 8, 10, true);
+            initAnimation(attack1Anim, tex.attack1, 128, 128, 6, 6, 14, false);
+            initAnimation(attack2Anim, tex.attack2, 128, 128, 6, 6, 14, false);
+            initAnimation(attack3Anim, tex.attack3, 128, 128, 6, 6, 14, false);
+            initAnimation(hurtAnim, tex.hurt, 128, 128, 2, 2, 8, false);
+            initAnimation(deadAnim, tex.dead, 128, 128, 3, 3, 6, false);
+            animState = IDLE;
         }
 
         void chooseAndStartAttack(){
@@ -471,7 +510,7 @@ void pulsatingEffect(float& alpha ,float delta){
     }
 }
 
-void initAnimation(Animation& anim, Texture2D tex, int fw, int fh, int count, int framesPerRow, float fps, bool loop = true){
+void initAnimation(Animation& anim, Texture2D tex, int fw, int fh, int count, int framesPerRow, float fps, bool loop){
     anim.animTexture = tex;
     anim.frameWidth = fw;
     anim.frameHeight = fh;
@@ -511,6 +550,15 @@ void updateAnimation(Animation& anim, float delta){
     }
 }
 
+void drawBillboardAnimation(const Camera3D& cam, const Animation& anim, Vector3 worldPos, float scale, Color tint){
+    Rectangle source = anim.source;
+
+    Vector2 size = {anim.frameWidth * scale, anim.frameHeight * scale};
+    Vector2 origin = { size.x / 2, size.y / 2 };
+
+    DrawBillboardPro(cam, anim.animTexture, source, worldPos, {0, 1, 0}, size, origin, 0.0f, tint);
+}
+
 void drawAnimation(const Animation& anim, Vector2 pos, float scale, Color tint = WHITE){
     Rectangle dest = {pos.x, pos.y, anim.frameWidth * scale, anim.frameHeight * scale};
     DrawTexturePro(anim.animTexture, anim.source, dest, {0, 0}, 0.0f, tint);
@@ -534,18 +582,19 @@ int main()
     Texture2D petals = LoadTexture("assets/petal_anim_spritesheet.png");
     Model scenery = LoadModel("assets/scenery.glb");
 
-    //player animations
+    //player and enemy animations
     CharacterAnimations playerTex;
-    playerTex.idle   = LoadTexture("assets/Fighter/Idle.png");
-    playerTex.run    = LoadTexture("assets/Fighter/Run.png");
-    playerTex.walk = LoadTexture("assets/Fighter/Walk.png");
+    playerTex.idle = LoadTexture("assets/Fighter/Idle.png");
     playerTex.attack1= LoadTexture("assets/Fighter/Attack_1.png");
     playerTex.attack2= LoadTexture("assets/Fighter/Attack_2.png");
     playerTex.attack3= LoadTexture("assets/Fighter/Attack_3.png");
-    playerTex.parry  = LoadTexture("assets/Fighter/Shield.png");
-    playerTex.dodge  = LoadTexture("assets/Fighter/Jump.png");
-    playerTex.hurt   = LoadTexture("assets/Fighter/Hurt.png");
-    playerTex.dead   = LoadTexture("assets/Fighter/Dead.png");
+    playerTex.parry = LoadTexture("assets/Fighter/Shield.png");
+    playerTex.dodge = LoadTexture("assets/Fighter/Jump.png");
+    playerTex.hurt  = LoadTexture("assets/Fighter/Hurt.png");
+    playerTex.dead  = LoadTexture("assets/Fighter/Dead.png");
+
+    CharacterAnimations enemyTex;
+    enemyTex.idle = LoadTexture("assets/Samurai/Idle.png");
 
     Animation petalFlowAnim;
     initAnimation(petalFlowAnim, petals, 512, 288, 64, 8, 18, true);
@@ -567,10 +616,11 @@ int main()
     float textAlpha = 0.0f;
 
     //fighters
-    Player player(50, 5, {5, 1, 0});
-    Enemy enemy(50, 5, {-5, 1, 0});
+    Player player(50, 5, {5, 2.35f, 0});
+    Enemy enemy(50, 5, {-5, 2.35f, 0});
 
     player.initAnimations(playerTex);
+    enemy.initAnimations(enemyTex);
     
     //camera
     Camera3D cam = Camera3D();
@@ -587,7 +637,7 @@ int main()
     //state management
     GameState gameState = PLAYER_TURN;
     PlayerDefenseState playerDefenseState = NONE;
-    AppState appState = MAIN_MENU;
+    AppState appState = IN_GAME;
 
     //put the logic stuff before any of the drawing stuff unless you have to do so otherwise
     //IMPORTANT NOTE: YOU CAN HAVE PLAYER STATES AND ENEMY STATES RUN AT THE SAME TIME, THE WHILE LOOP IS RUNNING EVERY FRAME ANYWAYS, USE IT TO YOUR ADVANTAGE
@@ -647,8 +697,11 @@ int main()
             {
                 BeginMode3D(cam);
 
-                player.draw(cubeModel, player.getPos(), BLUE);
-                enemy.draw(cubeModel, enemy.getPos(), RED);
+               player.updateFighterAnimation(delta);
+                enemy.updateFighterAnimation(delta);
+
+                player.drawBillboard(cam);
+                enemy.drawBillboard(cam);
 
                 DrawModelEx(scenery, {-5.5f, 0, 0}, {0, 1, 0}, 90.0f, {1.0f, 1.0f, 1.0f}, WHITE);
 
@@ -700,7 +753,6 @@ int main()
                         case ENEMY_TURN: //add attack class thingy
                         {
                             updateEnenmyTurn(delta, player, enemy, playerDefenseState, gameState);                
-
                             break;
                         }
 
