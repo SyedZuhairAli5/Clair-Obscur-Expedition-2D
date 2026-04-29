@@ -232,6 +232,10 @@ class Fighters{
 
         void drawBillboard(const Camera3D& cam){
             drawBillboardAnimation(cam, getAnimFromState(), position, 0.035f,facingRight, WHITE);
+
+            if(animState == HURT){
+                drawBillboardAnimation(cam, getAnimFromState(), position, 0.035f,facingRight, GRAY);
+            }
         }
 
         void playIdle() {
