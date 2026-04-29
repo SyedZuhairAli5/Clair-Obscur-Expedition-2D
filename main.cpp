@@ -221,6 +221,12 @@ class Fighters{
         virtual void chooseAndStartAttack() = 0;
 
         void updateFighterAnimation(float delta){
+            if(animLockTimer > 0.0f){
+                animLockTimer -= delta;
+                updateAnimation(getAnimFromState(), delta);
+                return;
+            }
+
             updateAnimation(getAnimFromState(), delta);
         }
 
@@ -228,15 +234,40 @@ class Fighters{
             drawBillboardAnimation(cam, getAnimFromState(), position, 0.035f,facingRight, WHITE);
         }
 
-        void playHurt(float lockTime = 0.35f){
-            animState = HURT;
+        void playIdle() {
+            setAnimState(IDLE);
+        }
+
+        void playAttackAnim(int index) {
+            if(index == 0) setAnimState(ATTACK1);
+            else if(index == 1) setAnimState(ATTACK2);
+            else setAnimState(ATTACK3);
+        }
+
+        void playParry() {
+            animLockTimer = 0.35f;
+            setAnimState(PARRYANIM);
+        }
+
+        void playDodge() {
+            animLockTimer = 0.45f;
+            setAnimState(DODGEANIM);
+        }
+
+        void playHurt(float lockTime = 0.35f) {
             animLockTimer = lockTime;
+            setAnimState(HURT);
             getAnimFromState().animFinsihed = false;
         }
 
-
         void takeDamage(int dmg){
             hp -= dmg;
+            playHurt();
+
+            if(hp <= 0 ){
+                hp = 0;
+                setAnimState(DEAD);
+            }
         }
 
         void draw(Model m, Vector3 pos, Color c){
@@ -341,7 +372,7 @@ class Player: public Fighters{
             initAnimation(attack3Anim, tex.attack3, 128, 128, 6, 6, 14, false);
             initAnimation(parryAnim,   tex.parry,   128, 128, 4, 4, 10, false);
             initAnimation(dodgeAnim,   tex.dodge,   128, 128, 6, 6, 12, false);
-            initAnimation(hurtAnim, tex.hurt, 128, 128, 3, 3, 8, false);
+            initAnimation(hurtAnim, tex.hurt, 128, 128, 3, 3, 12, false);
             initAnimation(deadAnim, tex.dead, 128, 128, 3, 3, 6, false);
 
             animState = IDLE;
@@ -351,8 +382,8 @@ class Player: public Fighters{
             if(isAttacking()) return; //don't do anything if an attack already exists, exists function
 
             if (attackOrSkill == 0){
-                DrawText("1) ATTACKS", 950, 610, 20, BLACK);
-                DrawText("2) SKILLS", 950, 630, 20, BLACK);
+                DrawText("1) ATTACKS", 950, 610, 30, BLACK);
+                DrawText("2) SKILLS", 950, 640, 30, BLACK);
 
                 if (IsKeyPressed(KEY_ONE)) attackOrSkill = 1;
                 if (IsKeyPressed(KEY_TWO)) attackOrSkill = 2;
@@ -366,24 +397,21 @@ class Player: public Fighters{
             //drawing the options
             if(attackOrSkill == 1){
                 for(int i=0; i<attackList.size(); i++){
-                    DrawText(TextFormat("%i) %s", i+1, attackList[i].attackName.c_str()), 950, 610 + i * 22, 20, BLACK);
+                    DrawText(TextFormat("%i) %s", i+1, attackList[i].attackName.c_str()), 950, 610 + i * 25, 30, BLACK);
                 }
-
-                if(selectedAttack== 0) setAnimState(ATTACK1);
-                else if(selectedAttack == 1) setAnimState(ATTACK2);
             }
             if(attackOrSkill == 2){
                 for(int i=0; i<skillList.size(); i++){
-                    DrawText(TextFormat("%i) %s (AP: %i)", i+1, skillList[i].attackName.c_str(), skillList[i].apCost), 950, 610 + i * 22, 20, BLACK);
+                    DrawText(TextFormat("%i) %s (AP: %i)", i+1, skillList[i].attackName.c_str(), skillList[i].apCost), 950, 610 + i * 25, 30, BLACK);
                 }
 
-                setAnimState(ATTACK3);
             }
 
             if (IsKeyPressed(KEY_ENTER)){
                 if (attackOrSkill == 1){
                     if (selectedAttack >= 0 && selectedAttack < attackList.size()){
                         startAttack(attackList[selectedAttack]);
+                        playAttackAnim(selectedAttack);
                     }
                 }
 
@@ -392,6 +420,7 @@ class Player: public Fighters{
                         if (AP >= skillList[selectedAttack].apCost){
                             startAttack(skillList[selectedAttack]);
                             AP -= skillList[selectedAttack].apCost;
+                            playAttackAnim(2);
                         }
                     }
                 }
@@ -402,6 +431,8 @@ class Player: public Fighters{
         }
 
         void updateAnimationState(){
+            if(animLockTimer > 0.0f) return;
+
             if (isDead()){
                 setAnimState(DEAD);
                 return;
@@ -416,13 +447,13 @@ class Player: public Fighters{
                         break;
 
                     case ATTACK_FINISHED:
-                        setAnimState(IDLE);
+                        playIdle();
                         break;
                 }
                 return;
             }
 
-            setAnimState(IDLE);
+            playIdle();
         }
 
         //timer, parry, dodge and AP setters
@@ -445,6 +476,7 @@ class Player: public Fighters{
 class Enemy: public Fighters{
     private:
         bool enemyTurnResolved;
+        int attackIndex;
 
     public:
         Enemy(int h, int d, Vector3 pos): Fighters(h, d, pos), enemyTurnResolved(false) {
@@ -464,38 +496,41 @@ class Enemy: public Fighters{
             initAnimation(attack1Anim, tex.attack1, 128, 128, 6, 6, 14, false);
             initAnimation(attack2Anim, tex.attack2, 128, 128, 6, 6, 14, false);
             initAnimation(attack3Anim, tex.attack3, 128, 128, 6, 6, 14, false);
-            initAnimation(hurtAnim, tex.hurt, 128, 128, 2, 2, 8, false);
+            initAnimation(hurtAnim, tex.hurt, 128, 128, 2, 2, 12, false);
             initAnimation(deadAnim, tex.dead, 128, 128, 3, 3, 6, false);
             animState = IDLE;
         }
 
+        void chooseAndStartAttack(){
+            if(isAttacking()) return;
+
+            attackIndex = GetRandomValue(0, attackList.size() - 1);
+            startAttack(attackList[attackIndex]);
+        }
+
         void updateAnimationState(){
+            if(animLockTimer > 0.0f) return;
+
             if (isDead()){
                 setAnimState(DEAD);
                 return;
             }
 
             if (isAttacking()){
-                if (attackingState() == ATTACK_WINDUP ||
-                    attackingState() == ATTACK_ACTIVE)
-                {
-                    setAnimState(ATTACK1); // or randomize later
+                if (attackingState() == ATTACK_WINDUP || attackingState() == ATTACK_ACTIVE){
+                    //setAnimState(ATTACK1); // or randomize later
+                    if(attackIndex == 0) setAnimState(ATTACK1);
+                    else if(attackIndex == 1) setAnimState(ATTACK2);
+                    else if(attackIndex == 2) setAnimState(ATTACK3);
+                    
                 }
-                else if (attackingState() == ATTACK_FINISHED)
-                {
-                    setAnimState(IDLE);
+                else if (attackingState() == ATTACK_FINISHED){
+                    playIdle();
                 }
                 return;
             }
 
-            setAnimState(IDLE);
-        }
-
-        void chooseAndStartAttack(){
-            if(isAttacking()) return;
-
-            int index = GetRandomValue(0, attackList.size() - 1);
-            startAttack(attackList[index]);
+            playIdle();
         }
 
         //getters/setters
@@ -715,7 +750,7 @@ int main()
     //state management
     GameState gameState = PLAYER_TURN;
     PlayerDefenseState playerDefenseState = NONE;
-    AppState appState = MAIN_MENU;
+    AppState appState = IN_GAME;
 
     //put the logic stuff before any of the drawing stuff unless you have to do so otherwise
     //IMPORTANT NOTE: YOU CAN HAVE PLAYER STATES AND ENEMY STATES RUN AT THE SAME TIME, THE WHILE LOOP IS RUNNING EVERY FRAME ANYWAYS, USE IT TO YOUR ADVANTAGE
@@ -850,10 +885,12 @@ int main()
                                 if(IsKeyPressed(KEY_R)){
                                     player.debugColor = BLUE;
                                     playerDefenseState = PARRY;
+                                    player.playParry();
                                 }
                                 else if(IsKeyPressed(KEY_Q)){
                                     player.debugColor = BLUE;
                                     playerDefenseState = DODGE;
+                                    player.playDodge();
                                 }
 
                                 break;
