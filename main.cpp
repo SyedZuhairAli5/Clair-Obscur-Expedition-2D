@@ -149,6 +149,7 @@ class Fighters{
         int hp;
         int damage;
         bool facingRight;
+        float animLockTimer = 0.0f;
         Vector3 position;
         
         Attack* currAttack;
@@ -174,14 +175,14 @@ class Fighters{
             {
                 case IDLE: return idleAnim;
                 case RUN: return runAnim;
-                case ATTACK1:   return attack1Anim;
-                case ATTACK2:   return attack2Anim;
-                case ATTACK3:   return attack3Anim;
+                case ATTACK1: return attack1Anim;
+                case ATTACK2: return attack2Anim;
+                case ATTACK3: return attack3Anim;
                 case PARRYANIM: return parryAnim;
                 case DODGEANIM: return dodgeAnim;
-                case HURT:      return hurtAnim;
-                case DEAD:      return deadAnim;
-                default:        return idleAnim;
+                case HURT: return hurtAnim;
+                case DEAD: return deadAnim;
+                default: return idleAnim;
             }
         }
 
@@ -227,12 +228,15 @@ class Fighters{
             drawBillboardAnimation(cam, getAnimFromState(), position, 0.035f,facingRight, WHITE);
         }
 
+        void playHurt(float lockTime = 0.35f){
+            animState = HURT;
+            animLockTimer = lockTime;
+            getAnimFromState().animFinsihed = false;
+        }
+
+
         void takeDamage(int dmg){
             hp -= dmg;
-
-            if(hp <= 0){
-                hp = 0;
-            }
         }
 
         void draw(Model m, Vector3 pos, Color c){
@@ -711,7 +715,7 @@ int main()
     //state management
     GameState gameState = PLAYER_TURN;
     PlayerDefenseState playerDefenseState = NONE;
-    AppState appState = IN_GAME;
+    AppState appState = MAIN_MENU;
 
     //put the logic stuff before any of the drawing stuff unless you have to do so otherwise
     //IMPORTANT NOTE: YOU CAN HAVE PLAYER STATES AND ENEMY STATES RUN AT THE SAME TIME, THE WHILE LOOP IS RUNNING EVERY FRAME ANYWAYS, USE IT TO YOUR ADVANTAGE
