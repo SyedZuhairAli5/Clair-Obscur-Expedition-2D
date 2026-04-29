@@ -7,32 +7,12 @@
 
 using namespace std;
 
-enum AppState{
-    MAIN_MENU,
-    IN_GAME,
-    EXIT
-};
-
+enum AppState{MAIN_MENU, IN_GAME, EXIT};
 //game states: who's turn is it?
-enum GameState{
-    PLAYER_TURN,
-    ENEMY_TURN,
-    GAME_OVER
-};
-
-enum AttackState{
-    ATTACK_WINDUP,
-    ATTACK_ACTIVE,
-    ATTACK_RECOVERY,
-    ATTACK_FINISHED
-};
-
-enum PlayerDefenseState{
-    NONE,
-    PARRY,
-    DODGE,
-    COOLDOWN
-};
+enum GameState{PLAYER_TURN, ENEMY_TURN, GAME_OVER};
+enum AttackState{ATTACK_WINDUP, ATTACK_ACTIVE, ATTACK_RECOVERY, ATTACK_FINISHED};
+enum PlayerDefenseState{NONE, PARRY, DODGE, COOLDOWN};
+enum AnimState{ IDLE, RIN, ATTACK1, ATTACK2, ATTACK3, PARRYANIM, DODGEANIM, HURT, DEAD };
 
 struct AttackData{
     string attackName;
@@ -71,7 +51,21 @@ struct Animation{
     Rectangle source;
 };
 
+struct CharacterAnimations{
+    Texture2D idle; 
+    Texture2D run; 
+    Texture2D walk;
+    Texture2D attack1; 
+    Texture2D attack2; 
+    Texture2D attack3; 
+    Texture2D parry; 
+    Texture2D dodge; 
+    Texture2D hurt; 
+    Texture2D dead;
+};
+
 vector<AttackData> loadAttacksFromFile(const string& path);
+void initAnimation(Animation& anim, Texture2D tex, int fw, int fh, int count, int framesPerRow, float fps, bool loop = true);
 
 class Attack{
     private:
@@ -156,6 +150,20 @@ class Fighters{
         vector<AttackData> attackList;
         vector<AttackData> skillList;
 
+        AnimState animState;
+        Animation currentAnim;
+
+        Animation idleAnim;
+        Animation runAnim;
+        Animation walkAnim;
+        Animation attack1Anim;
+        Animation attack2Anim;
+        Animation attack3Anim;
+        Animation parryAnim;
+        Animation dodgeAnim;
+        Animation hurtAnim;
+        Animation deadAnim;
+
         void setHitboxPos(float x, float y){
             hitboxRect.x = x;
             hitboxRect.y = y;
@@ -168,6 +176,7 @@ class Fighters{
             hitboxRect.height = 100;
             hitboxRect.width = 100;
             currAttack = nullptr;
+            animState = IDLE;
         }
 
         virtual ~Fighters(){
@@ -279,6 +288,18 @@ class Player: public Fighters{
                     it = attackList.erase(it);
                 } else {++it;}
             }
+        }
+
+        void initAnimations(const CharacterAnimations& tex){
+            initAnimation(idleAnim,    tex.idle,    128, 128, 8, 8, 10, true);
+            initAnimation(runAnim,     tex.run,     128, 128, 8, 8, 12, true);
+            initAnimation(attack1Anim, tex.attack1, 128, 128, 6, 6, 14, false);
+            initAnimation(attack2Anim, tex.attack2, 128, 128, 6, 6, 14, false);
+            initAnimation(attack3Anim, tex.attack3, 128, 128, 6, 6, 14, false);
+            initAnimation(parryAnim,   tex.parry,   128, 128, 4, 4, 10, false);
+            initAnimation(dodgeAnim,   tex.dodge,   128, 128, 6, 6, 12, false);
+
+            animState = IDLE;
         }
 
         void chooseAndStartAttack(){
@@ -513,6 +534,19 @@ int main()
     Texture2D petals = LoadTexture("assets/petal_anim_spritesheet.png");
     Model scenery = LoadModel("assets/scenery.glb");
 
+    //player animations
+    CharacterAnimations playerTex;
+    playerTex.idle   = LoadTexture("assets/Fighter/Idle.png");
+    playerTex.run    = LoadTexture("assets/Fighter/Run.png");
+    playerTex.walk = LoadTexture("assets/Fighter/Walk.png");
+    playerTex.attack1= LoadTexture("assets/Fighter/Attack_1.png");
+    playerTex.attack2= LoadTexture("assets/Fighter/Attack_2.png");
+    playerTex.attack3= LoadTexture("assets/Fighter/Attack_3.png");
+    playerTex.parry  = LoadTexture("assets/Fighter/Shield.png");
+    playerTex.dodge  = LoadTexture("assets/Fighter/Jump.png");
+    playerTex.hurt   = LoadTexture("assets/Fighter/Hurt.png");
+    playerTex.dead   = LoadTexture("assets/Fighter/Dead.png");
+
     Animation petalFlowAnim;
     initAnimation(petalFlowAnim, petals, 512, 288, 64, 8, 18, true);
 
@@ -535,6 +569,8 @@ int main()
     //fighters
     Player player(50, 5, {5, 1, 0});
     Enemy enemy(50, 5, {-5, 1, 0});
+
+    player.initAnimations(playerTex);
     
     //camera
     Camera3D cam = Camera3D();
