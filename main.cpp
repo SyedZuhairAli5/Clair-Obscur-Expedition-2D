@@ -750,7 +750,7 @@ int main()
     //state management
     GameState gameState = PLAYER_TURN;
     PlayerDefenseState playerDefenseState = NONE;
-    AppState appState = IN_GAME;
+    AppState appState = MAIN_MENU;
 
     //put the logic stuff before any of the drawing stuff unless you have to do so otherwise
     //IMPORTANT NOTE: YOU CAN HAVE PLAYER STATES AND ENEMY STATES RUN AT THE SAME TIME, THE WHILE LOOP IS RUNNING EVERY FRAME ANYWAYS, USE IT TO YOUR ADVANTAGE
